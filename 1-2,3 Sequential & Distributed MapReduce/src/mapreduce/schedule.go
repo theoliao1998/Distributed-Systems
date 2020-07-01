@@ -47,4 +47,5 @@ func (mr *Master) workOnTask(phase jobPhase, taskid int, nios int, wg *sync.Wait
 		ok = call(w, "Worker.DoTask", &args, nil)
 	}
 	mr.registerChannel <- w
+	return
 }
