@@ -85,6 +85,7 @@ func injectEvents(fileName string, sim *Simulator) []*SnapshotState {
 
 	lines := strings.FieldsFunc(string(b), func(r rune) bool { return r == '\n' })
 	for _, line := range lines {
+		fmt.Println(line)
 		// Ignore comments
 		if strings.HasPrefix("#", line) {
 			continue
@@ -118,9 +119,10 @@ func injectEvents(fileName string, sim *Simulator) []*SnapshotState {
 			log.Fatal("Unknown event command: ", parts[0])
 		}
 	}
-
+	fmt.Println("numS: " + strconv.Itoa(numSnapshots))
 	// Keep ticking until snapshots complete
 	for numSnapshots > 0 {
+		
 		select {
 		case snap := <-getSnapshots:
 			snapshots = append(snapshots, snap)
@@ -309,6 +311,7 @@ func checkTokens(sim *Simulator, snapshots []*SnapshotState) {
 		for _, message := range snap.messages {
 			switch msg := message.message.(type) {
 			case TokenMessage:
+				fmt.Println("did append " + strconv.Itoa(msg.numTokens))
 				snapTokens += msg.numTokens
 			}
 		}
