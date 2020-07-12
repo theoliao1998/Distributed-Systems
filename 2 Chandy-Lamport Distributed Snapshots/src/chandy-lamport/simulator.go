@@ -4,7 +4,6 @@ import (
 	"log"
 	"fmt"
 	"math/rand"
-	"strconv"
 )
 
 // Max random delay added to packet delivery
@@ -43,7 +42,7 @@ func NewSimulator() *Simulator {
 // Note: since we only deliver one message to a given server at each time step,
 // the message may be received *after* the time step returned in this function.
 func (sim *Simulator) GetReceiveTime() int {
-	return sim.time + 1 + rand.Intn(5)
+	return sim.time + 1  + rand.Intn(5)
 }
 
 // Add a server to this simulator with the specified number of starting tokens
@@ -99,7 +98,6 @@ func (sim *Simulator) Tick() {
 						sim.servers[e.dest],
 						ReceivedMessageEvent{e.src, e.dest, e.message})
 					sim.servers[e.dest].HandlePacket(e.src, e.message)
-					//sim.logger.PrettyPrint()
 					break
 				}
 			}
@@ -146,7 +144,6 @@ func (sim *Simulator) CollectSnapshot(snapshotId int) *SnapshotState {
 	for _, v := range sim.completed[snapshotId] {
 		go func(done chan bool, v chan bool){
 			<- v 
-			fmt.Println("got!")
 			done <- true
 		} (done, v)
 	}
@@ -154,21 +151,27 @@ func (sim *Simulator) CollectSnapshot(snapshotId int) *SnapshotState {
 		<- done
 	}
 	
-	tokens := make(map[string]int, len(sim.servers))
+	tokens := make(map[string]int)
 	messages := make([]*SnapshotMessage,0)
-	for dest, server := range sim.servers{
-		tokens[dest] = server.snapshotState[snapshotId].tokens
-		for _,msg := range server.snapshotState[snapshotId].messages{
-			messages = append(messages,msg)
-			switch m := msg.message.(type) {
-			case TokenMessage:
-				fmt.Println("append " + strconv.Itoa(m.numTokens))
+	for _, serverId := range getSortedKeys(sim.servers){
+		server := sim.servers[serverId]
+		server.snapshotState.Range(func(k, v interface{})bool{
+			if key, isInt := k.(int); isInt && key == snapshotId{
+				if snapshot, ok := v.(*Snapshot); ok {
+					tokens[serverId] = snapshot.tokens
+					for _, msg := range snapshot.messages{
+						messages = append(messages, msg)
+					}
+				}
 			}
-			//fmt.Println("append " + strconv.Itoa(msg.tokens.))
-		}
-
+			return true
+		})
 	}
 	snap := SnapshotState{snapshotId, tokens, messages}
 
 	return &snap
+}
+
+func printSlice(s []int) {
+	fmt.Printf("len=%d cap=%d %v\n", len(s), cap(s), s)
 }

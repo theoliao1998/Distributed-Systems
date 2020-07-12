@@ -1,8 +1,6 @@
 package chandy_lamport
 
 import "log"
-// import "strconv"
-// import "fmt"
 
 type Snapshot struct {
 	id       int
@@ -22,7 +20,7 @@ type Server struct {
 	outboundLinks map[string]*Link // key = link.dest
 	inboundLinks  map[string]*Link // key = link.src
 	// TODO: ADD MORE FIELDS HERE
-	snapshotState map[int]*Snapshot
+	snapshotState *SyncMap//map[int]*Snapshot
 	isRecording	  map[int] map[string] bool // key = src
 	completed	  map[int] map[string] bool // key = src
 }
@@ -42,7 +40,7 @@ func NewServer(id string, tokens int, sim *Simulator) *Server {
 		sim,
 		make(map[string]*Link),
 		make(map[string]*Link),
-		make(map[int]*Snapshot),
+		NewSyncMap(),
 		make(map[int] map[string] bool),
 		make(map[int] map[string] bool),
 	}
@@ -109,35 +107,41 @@ type Record struct {
 // should notify the simulator by calling `sim.NotifySnapshotComplete`.
 func (server *Server) HandlePacket(src string, message interface{}) {
 	// TODO: IMPLEMENT ME
-	
-
 
 	switch message := message.(type) {
 		case TokenMessage:
 			server.Tokens += message.numTokens
-			for snapshotId,snapshotState := range server.snapshotState {
-				isRecording, ok := server.isRecording[snapshotId][src]
-				if(snapshotState != nil && ok && isRecording){
-					//fmt.Println("append " + strconv.Itoa(message.numTokens))
-					snapshotState.messages = append(snapshotState.messages, &SnapshotMessage{src,server.Id,message})
+
+			server.snapshotState.Range(func(k, v interface{})bool{
+				if snapshotId, isInt := k.(int); isInt{
+					if isRecording, found := server.isRecording[snapshotId][src]; found && isRecording{
+						if snapshot, ok := v.(*Snapshot); ok {
+							snapshot.messages = append(snapshot.messages, &SnapshotMessage{src,server.Id,message})
+						}
+					}
 				}
-			}
+				
+				return true
+			})
 			
 		case MarkerMessage:
-			if _,found := server.isRecording[message.snapshotId]; !found{
-				server.isRecording[message.snapshotId] = make(map[string] bool)
-			}
-			server.isRecording[message.snapshotId][src] = false
-			if _,found := server.completed[message.snapshotId]; !found{
-				server.completed[message.snapshotId] = make(map[string] bool)
-			}
-			server.completed[message.snapshotId][src] = true
-			if _, found := server.snapshotState[message.snapshotId]; !found{
-				server.snapshotState[message.snapshotId] = &Snapshot{message.snapshotId,server.Tokens,make([]*SnapshotMessage,0)}
+			if _, found:= server.snapshotState.LoadOrStore(message.snapshotId,&Snapshot{message.snapshotId,server.Tokens,make([]*SnapshotMessage,0)}); !found {
 				server.SendToNeighbors(message)
+				server.completed[message.snapshotId] = make(map[string] bool)
+				server.isRecording[message.snapshotId] = make(map[string] bool)
+				for _, source := range getSortedKeys(server.inboundLinks) {
+					if(src != source){
+						server.isRecording[message.snapshotId][source] = true
+					} else {
+						server.isRecording[message.snapshotId][source] = false
+					}
+				}
+			} else {
+				server.isRecording[message.snapshotId][src] = false
 			}
-			//fmt.Println("server " + server.Id + " completed: " + strconv.Itoa( len(server.completed[message.snapshotId]) ))
-			//fmt.Println("needed " + strconv.Itoa(len(server.inboundLinks)))
+
+			server.completed[message.snapshotId][src] = true
+			
 			if  len(server.completed[message.snapshotId]) == len(server.inboundLinks) {
 				server.sim.NotifySnapshotComplete(server.Id, message.snapshotId);
 			}
@@ -152,10 +156,12 @@ func (server *Server) HandlePacket(src string, message interface{}) {
 // This should be called only once per server.
 func (server *Server) StartSnapshot(snapshotId int) {
 	// TODO: IMPLEMENT ME
-	server.snapshotState[snapshotId] = &Snapshot{snapshotId,server.Tokens,make([]*SnapshotMessage,0)}
+	server.snapshotState.LoadOrStore(snapshotId,&Snapshot{snapshotId,server.Tokens,make([]*SnapshotMessage,0)})
 	server.isRecording[snapshotId] = make(map[string] bool)
-	for dest, link := range server.outboundLinks {
-		link.events.Push(SendMessageEvent{server.Id, dest, MarkerMessage{snapshotId},server.sim.GetReceiveTime()})
-		server.isRecording[snapshotId][dest] = true
+	server.completed[snapshotId] =  make(map[string] bool)
+	for _, src := range getSortedKeys(server.inboundLinks) {
+		server.isRecording[snapshotId][src] = true
 	}
+	server.SendToNeighbors(MarkerMessage{snapshotId})
 }
+  
